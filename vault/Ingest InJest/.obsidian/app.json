@@ -1,0 +1,7 @@
+{
+  "alwaysUpdateLinks": true,
+  "showUnsupportedFiles": true,
+  "readableLineLength": false,
+  "strictLineBreaks": true,
+  "promptDelete": false
+}
