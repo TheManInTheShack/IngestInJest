@@ -6,11 +6,13 @@
 # ------------------------------------------------------------------------------
 # Imports
 # ------------------------------------------------------------------------------
-from datetime import datetime
 import sys
 import argparse
 import re
 import os
+import json
+
+from datetime import datetime
 from unidecode import unidecode
 from nltk.corpus import wordnet as wn
 from textblob import TextBlob
@@ -38,7 +40,9 @@ def cli():
 # ------------------------------------------------------------------------------
 def initialize(args):
     init = {}
-    init['rfile'] = os.path.join("data","raw_text.txt")
+    #init['rfile'] = os.path.join("data","raw_text.txt")
+    init['rfile'] = os.path.join("data","raw_text_small.txt")
+    init['cfile'] = os.path.join("data","cleaning.json")
     init['ifile'] = os.path.join("data","injest.xlsx")
     init['vdir']  = os.path.join("vault","Ingest InJest")
     return init
@@ -53,15 +57,17 @@ def main(args, init):
     print("starting...")
 
     # --------------------------------------------------------------------------
-    # Parse out an organized version of the raw book text
-    # --------------------------------------------------------------------------
-    corpus = parse_raw_text(init['rfile'])
-
-    # --------------------------------------------------------------------------
     # Parse the spreadsheet data
     # --------------------------------------------------------------------------
     postag = read_map_sheet(init['ifile'],'pos_tags')['POS Tags']
     postag = postag.set_index('POS')
+    data_snt = read_map_sheet(init['ifile'],'Sentences')['Sentences']
+    data_snt = data_snt.set_index(['Chapter Idx','Paragraph Idx'])
+
+    # --------------------------------------------------------------------------
+    # Parse out an organized version of the raw book text
+    # --------------------------------------------------------------------------
+    corpus = parse_raw_text(init['rfile'], data_snt)
 
     # --------------------------------------------------------------------------
     # Read the vault files and pull out things we've marked there
@@ -81,10 +87,9 @@ def main(args, init):
     # --------------------------------------------------------------------------
     # Write the sheets for the levels in the spreadsheet
     # --------------------------------------------------------------------------
-    o = write_output_page_level(lex_data, init['ifile'], corpus, "chapter")
-    o = write_output_page_level(lex_data, init['ifile'], corpus, "paragraph")
-    o = write_output_page_level(lex_data, init['ifile'], corpus, "sentence")
-
+    o = write_output_page_chapter(lex_data, init['ifile'], corpus)
+    o = write_output_page_paragraph(lex_data, init['ifile'], corpus)
+    o = write_output_page_sentence(lex_data, init['ifile'], corpus)
 
     # --------------------------------------------------------------------------
     # Write text files to the vault
@@ -100,7 +105,7 @@ def main(args, init):
 # ------------------------------------------------------------------------------
 # Read the raw text and parse it out into components
 # ------------------------------------------------------------------------------
-def parse_raw_text(rfile):
+def parse_raw_text(rfile, data_snt):
     # --------------------------------------------------------------------------
     # Start
     # --------------------------------------------------------------------------
@@ -110,6 +115,14 @@ def parse_raw_text(rfile):
     # Get the raw text 
     # --------------------------------------------------------------------------
     raw = open(rfile).read().splitlines()
+
+    # --------------------------------------------------------------------------
+    # Get the cleaning instructions
+    # --------------------------------------------------------------------------
+    cleaning = {}
+    cleaning['toc']  = {}
+    cleaning['text'] = {}
+    cleaning['note'] = {}
 
     # --------------------------------------------------------------------------
     # Work through each line and classify it
@@ -233,7 +246,6 @@ def parse_raw_text(rfile):
             elif current_chapter == "":
                 continue
 
-
             # ------------------------------------------------------------------
             # Three empty lines indicates a page break, one indicates paragraph
             # breaks...so we need to track the empty lines
@@ -309,6 +321,7 @@ def parse_raw_text(rfile):
     # --------------------------------------------------------------------------
     # Make a pass through the text and compile the lines to paragraphs
     # --------------------------------------------------------------------------
+    data_paragraph = {}
     for i, chapter in enumerate(text):
         # ----------------------------------------------------------------------
         # Initialize the paragraph holder
@@ -319,18 +332,19 @@ def parse_raw_text(rfile):
         # Work through each line in the chapter
         # ----------------------------------------------------------------------
         for j, line in enumerate(text[chapter]['lines']):
-            #if i == 0 and j < 25:
-            #    print(line)
             # ------------------------------------------------------------------
             # Make the index ID
             # ------------------------------------------------------------------
-            para_idx = (chapter,line[0])
+            para_idx = (chapter,line[0]+1)
 
             # ------------------------------------------------------------------
             # If the paragraph isn't there yet, start it 
             # ------------------------------------------------------------------
             if not para_idx in text[chapter]['paragraphs']:
                 text[chapter]['paragraphs'][para_idx] = ""
+
+            if not para_idx in data_paragraph:
+                data_paragraph[para_idx] = {}
 
             # ------------------------------------------------------------------
             # Line transitions
@@ -354,7 +368,7 @@ def parse_raw_text(rfile):
             text[chapter]['paragraphs'][para_idx] += line[3]
 
     # --------------------------------------------------------------------------
-    # Another pass to break the paragraphs into sentences
+    # Another pass to break the paragraphs into sentences and apply any cleaning
     # --------------------------------------------------------------------------
     for i, chapter in enumerate(text):
         # ----------------------------------------------------------------------
@@ -367,35 +381,157 @@ def parse_raw_text(rfile):
         # ----------------------------------------------------------------------
         for j, para_idx in enumerate(text[chapter]['paragraphs']):
             # ------------------------------------------------------------------
-            # Break the paragraph into sentences
+            # Break the paragraph into 'natural' sentences, meaning whatever the
+            # parser gives us
             # ------------------------------------------------------------------
             tb = TextBlob(text[chapter]['paragraphs'][para_idx])
             sentences = tb.sentences
 
             # ------------------------------------------------------------------
-            # Each sentence
+            # Get the existing version from the data to look for cleaning marks
             # ------------------------------------------------------------------
+            cidx = para_idx[0][0]
+            pidx = para_idx[1]
+            key = (cidx, pidx)
+            sdata = data_snt.loc[key]
+            sdata = sdata.reset_index()
+            sdata = sdata[['Sentence Idx','Cleaning Instruction','Text']]
+
+            # ------------------------------------------------------------------
+            # Work through each sentence, maybe clean, add it to the structure
+            # ------------------------------------------------------------------ 
+            clean_sentences = []
+            skips = 0
             for k, sentence in enumerate(sentences):
+                # --------------------------------------------------------------
+                # Maybe we'll be skipping the line because of an instruction on
+                # a previous line
+                # --------------------------------------------------------------
+                if skips > 0:
+                    skips -= 1
+                    continue
+
+                # --------------------------------------------------------------
+                # Cast the sentence as just the string of itself to simplify
+                # --------------------------------------------------------------
+                sentence = str(sentence)
+
+                # --------------------------------------------------------------
+                # The sentence index will be used a bunch
+                # --------------------------------------------------------------
+                sidx = k+1
+
+                # --------------------------------------------------------------
+                # Maybe there's a new instruction, so grab whatever is in that
+                # cell for this line.  It'll be semicolon separated, maybe.
+                # --------------------------------------------------------------
+                cleans = []
+                if k in sdata.index.tolist():
+                    cleans = [x.lower().strip().replace(" ","") for x in sdata.loc[k]['Cleaning Instruction'].split(";") if x]
+
+                # --------------------------------------------------------------
+                # Validate and refine the instructions
+                # --------------------------------------------------------------
+                for item in cleans:
+                    # ----------------------------------------------------------
+                    # Combine
+                    # ----------------------------------------------------------
+                    if item.startswith("combine"):
+                        # ------------------------------------------------------
+                        # What we really want is a number
+                        # ------------------------------------------------------
+                        combine_num = 0
+
+                        # ------------------------------------------------------
+                        # The instruction is at least written correctly
+                        # ------------------------------------------------------
+                        kill = False
+                        if not "+" in item:
+                            kill = True
+                        pieces = item.split("+")
+                        if not len(pieces) == 2:
+                            kill = True
+                        try:
+                            combine_num = int(pieces[1])
+                        except:
+                            kill = True
+                        if kill:
+                            kill_program(f"You've got a bad combine instruction in the sentence cleaning column. It should read like 'combine+1', where the 1 is however many following lines.  Found at c/p/s address {cidx}, {pidx}, {k}")
+
+                        # ------------------------------------------------------
+                        # Makes sense in context with the paragraph
+                        # ------------------------------------------------------
+                        if sidx + combine_num > len(sentences):
+                            kill_program(f"You've got a combine instruction in the sentence cleaning that would exceed the length of its paragraph.  Found at c/p/s address {cidx}, {pidx}, {k}")
+
+                    # ----------------------------------------------------------
+                    # Correct text
+                    # ----------------------------------------------------------
+                    if item.startswith("correct"):
+                        #TODO
+                        pass
+
+                # --------------------------------------------------------------
+                # Now we have a good list of cleans; add it back into the data
+                # structure that will be saved back out
+                # --------------------------------------------------------------
+                if cleans:
+                    if not cidx in cleaning['text']:
+                        cleaning['text'][cidx] = {}
+                    if not pidx in cleaning['text'][cidx]:
+                        cleaning['text'][cidx][pidx] = {}
+                    cleaning['text'][cidx][pidx][sidx] = cleans
+
+                # --------------------------------------------------------------
+                # Apply the cleaning
+                # --------------------------------------------------------------
+                for clean in cleans:
+                    # ----------------------------------------------------------
+                    # If it's a combo, rewrite the line as the combination of 
+                    # itself and its marked followers; also here set that many
+                    # of the next ones to skip
+                    # ----------------------------------------------------------
+                    if clean.startswith("combine"):
+                        sent = sentence
+                        cnum = int(clean.split("+")[1])
+                        for l in range(cnum):
+                            sent += " " + str(sentences[k+l+1])
+                            skips = cnum
+                        sentence = sent
+
+                # --------------------------------------------------------------
+                # Write clean sentence to list
+                # --------------------------------------------------------------
+                clean_sentences.append((sidx, sentence))
+
+            # ------------------------------------------------------------------
+            # Write the number of sentences
+            # ------------------------------------------------------------------
+            data_paragraph[para_idx]['num_sentences_orignal'] = len(sentences)
+            data_paragraph[para_idx]['num_sentences_clean']   = len(clean_sentences)
+
+            # ------------------------------------------------------------------
+            # Add each sentence to the big text structure
+            # ------------------------------------------------------------------
+            for k, sent_data in enumerate(clean_sentences):
                 # --------------------------------------------------------------
                 # Make the index ID
                 # --------------------------------------------------------------
-                sent_idx = (para_idx, k)
+                sent_idx = (para_idx, int(sent_data[0]), k+1)
 
                 # --------------------------------------------------------------
-                # Add the sentence
+                # Add the sentence to the raw text area
                 # --------------------------------------------------------------
-                #if i == 0 and j == 0:
-                #    print(sent_idx, sentence)
-                text[chapter]['sentences'][sent_idx] = sentence
+                text[chapter]['sentences'][sent_idx] = sent_data[1]
 
     # --------------------------------------------------------------------------
     # Set up the different levels that we want to lexify at by re-compiling the
     # text back up into a linear basic view for each
     # --------------------------------------------------------------------------
-    data_chapter   = {}
-    data_paragraph = {}
-    data_sentence  = {}
-    data_wordtags  = []
+    text_chapter   = {}
+    text_paragraph = {}
+    text_sentence  = {}
+    text_wordtags  = []
     for chapter in text:
         # ----------------------------------------------------------------------
         # Do the paragraph and compile the chapter as we go
@@ -404,37 +540,37 @@ def parse_raw_text(rfile):
         for para_idx in text[chapter]['paragraphs']:
             para_text = text[chapter]['paragraphs'][para_idx]
             buff_chapter += " " + para_text
-            data_paragraph[para_idx] = para_text
+            text_paragraph[para_idx] = para_text
 
         # ----------------------------------------------------------------------
         # Write the chapter that got compiled
         # ----------------------------------------------------------------------
-        data_chapter[chapter] = buff_chapter
+        text_chapter[chapter] = buff_chapter
 
         # ----------------------------------------------------------------------
-        # Do the sentences (note we are un-textblobbing here and just saving
-        # the text. The lexing function will re-textblob it when appropriate.
+        # Do the sentences - note that before we text-ified the sentence so that
+        # we might combine it; now we have to re-TextBlob it to get the tags
         # ----------------------------------------------------------------------
         for sent_idx in text[chapter]['sentences']:
             sent_text = text[chapter]['sentences'][sent_idx]
-            data_sentence[sent_idx] = str(sent_text)
+            text_sentence[sent_idx] = sent_text
 
-            for wordtag in sent_text.tags:
-                data_wordtags.append(wordtag)
+            for wordtag in TextBlob(sent_text).tags:
+                text_wordtags.append(wordtag)
 
     # --------------------------------------------------------------------------
     # Compile the plain sentence text back up to the full volume
     # --------------------------------------------------------------------------
-    data_volume = " ".join([data_sentence[x] for x in data_sentence])
+    text_volume = " ".join([text_sentence[x] for x in text_sentence])
 
     # --------------------------------------------------------------------------
     # User info
     # --------------------------------------------------------------------------
-    print(f"......chapters:   {len(data_chapter)}")
-    print(f"......paragraphs: {len(data_paragraph)}")
-    print(f"......sentences:  {len(data_sentence)}")
-    print(f"......words:      {len(data_wordtags)}")
-    print(f"......glyphs:     {len(data_volume)}")
+    print(f"......chapters:   {len(text_chapter)}")
+    print(f"......paragraphs: {len(text_paragraph)}")
+    print(f"......sentences:  {len(text_sentence)}")
+    print(f"......words:      {len(text_wordtags)}")
+    print(f"......glyphs:     {len(text_volume)}")
 
     # --------------------------------------------------------------------------
     # Consolidate
@@ -445,12 +581,16 @@ def parse_raw_text(rfile):
     corpus['note'] = note
 
     corpus['text_lvl'] = {}
-    corpus['text_lvl']['volume']    = data_volume
-    corpus['text_lvl']['chapter']   = data_chapter
-    corpus['text_lvl']['paragraph'] = data_paragraph
-    corpus['text_lvl']['sentence']  = data_sentence
-    corpus['text_lvl']['word_tags'] = data_wordtags
+    corpus['text_lvl']['volume']    = text_volume
+    corpus['text_lvl']['chapter']   = text_chapter
+    corpus['text_lvl']['paragraph'] = text_paragraph
+    corpus['text_lvl']['sentence']  = text_sentence
+    corpus['text_lvl']['word_tags'] = text_wordtags
 
+    corpus['data_lvl'] = {}
+    corpus['data_lvl']['paragraph'] = data_paragraph
+
+    corpus['cleaning'] = cleaning
 
     # --------------------------------------------------------------------------
     # Finish
@@ -618,7 +758,6 @@ def parse_obsidian_vault(vdir):
     # --------------------------------------------------------------------------
     vinfo = {}
 
-
     # --------------------------------------------------------------------------
     # Finish
     # --------------------------------------------------------------------------
@@ -700,30 +839,23 @@ def write_output_page_lexicon(lex_data, ifile):
 # ------------------------------------------------------------------------------
 # Write out one page to the spreadsheet for a particular 'level' of text
 # ------------------------------------------------------------------------------
-def write_output_page_level(lex_data, ifile, corpus, level):
+def write_output_page_chapter(lex_data, ifile, corpus):
     # --------------------------------------------------------------------------
     # Start
     # --------------------------------------------------------------------------
-    print(f"...writing {level} data to spreadsheet...")
+    print(f"...writing chapter data to spreadsheet...")
 
     # --------------------------------------------------------------------------
     # Get the lexicon data for this particular level
     # --------------------------------------------------------------------------
-    lex_lev = lex_data[level]
-    txt_lev = corpus['text_lvl'][level]
-
-    #show_me(lex_lev)
-    #show_me(txt_lev)
+    lex_lev = lex_data['chapter']
+    txt_lev = corpus['text_lvl']['chapter']
 
     # --------------------------------------------------------------------------
     # Make the level label out of the simple name
     # --------------------------------------------------------------------------
-    lvl_lbl = level + "s"
+    lvl_lbl = "chapters"
     lvl_lbl = lvl_lbl[:1].upper() + lvl_lbl[1:]
-
-    chap = ['Index','Chapter Idx','Page','Title','Num Paragraphs','Num Sentences',"x"]
-    para = ['Index','Chapter Idx','Page','Title','Paragraph Idx' ,'Num Sentences',"x"]
-    sent = ['Index','Chapter Idx','Page','Title','Paragraph Idx' ,'Sentence Idx',"x"]
 
     # --------------------------------------------------------------------------
     # Header
@@ -731,12 +863,7 @@ def write_output_page_level(lex_data, ifile, corpus, level):
     header = []
     header.append([lvl_lbl,"","","","","","","User"])
     header.append([])
-    if level == "chapter":
-        header.append(chap)
-    elif level == "paragraph":
-        header.append(para)
-    elif level == "sentence":
-        header.append(sent)
+    header.append(['Index','Chapter Idx','Page','Title','Num Paragraphs','Num Sentences',"x"])
 
     # --------------------------------------------------------------------------
     # Body
@@ -752,29 +879,16 @@ def write_output_page_level(lex_data, ifile, corpus, level):
         # ----------------------------------------------------------------------
         # Tear apart the index
         # ----------------------------------------------------------------------
-        if level == "chapter":
-            cidx  = idx[0]
-            page  = idx[1]
-            title = idx[2]
-            pidx  = len(corpus['text'][idx]['paragraphs'])
-            sidx  = len(corpus['text'][idx]['sentences'])
+        cidx  = idx[0]
+        page  = idx[1]
+        title = idx[2]
 
-        elif level == "paragraph":
-            cidx  = idx[0][0]
-            page  = idx[0][1]
-            title = idx[0][2]
-            pidx  = idx[1]
-            sidx  = ""
+        # ----------------------------------------------------------------------
+        # Get the number of paragraphs and sentences
+        # ----------------------------------------------------------------------
+        pnum  = len(corpus['text'][idx]['paragraphs'])
+        snum  = len(corpus['text'][idx]['sentences'])
 
-        elif level == "sentence":
-            if i == 0:
-                print("bar", idx)
-            cidx  = idx[0][0][0]
-            page  = idx[0][0][1]
-            title = idx[0][0][2]
-            pidx  = idx[0][1]
-            sidx  = idx[1]
-        
         # ----------------------------------------------------------------------
         # Make the record and add it
         # ----------------------------------------------------------------------
@@ -783,8 +897,8 @@ def write_output_page_level(lex_data, ifile, corpus, level):
         rec.append(cidx)
         rec.append(page)
         rec.append(title)
-        rec.append(pidx)
-        rec.append(sidx)
+        rec.append(pnum)
+        rec.append(snum)
 
         body.append(rec)
 
@@ -805,6 +919,213 @@ def write_output_page_level(lex_data, ifile, corpus, level):
     fmt['freeze_panes']   = "A4"
     fmt['gutter_cols']    = ["G"]
     fmt['zoom']           = 80
+
+    # --------------------------------------------------------------------------
+    # Write the sheet in the file
+    # --------------------------------------------------------------------------
+    wb = xl.load_workbook(ifile)
+    o = write_excel_sheet(wb, lvl_lbl, data, fmt)
+    wb.save(ifile)
+    wb.close()
+
+    # --------------------------------------------------------------------------
+    # Finish
+    # --------------------------------------------------------------------------
+    return True
+
+# ------------------------------------------------------------------------------
+# Write out one page to the spreadsheet for a particular 'level' of text
+# ------------------------------------------------------------------------------
+def write_output_page_paragraph(lex_data, ifile, corpus):
+    # --------------------------------------------------------------------------
+    # Start
+    # --------------------------------------------------------------------------
+    print("...writing paragraph data to spreadsheet...")
+
+    # --------------------------------------------------------------------------
+    # Get the lexicon data for this particular level
+    # --------------------------------------------------------------------------
+    lex_lev = lex_data['paragraph']
+    txt_lev = corpus['text_lvl']['paragraph']
+    dat_lev = corpus['data_lvl']['paragraph']
+
+    # --------------------------------------------------------------------------
+    # Make the level label out of the simple name
+    # --------------------------------------------------------------------------
+    lvl_lbl = "paragraphs"
+    lvl_lbl = lvl_lbl[:1].upper() + lvl_lbl[1:]
+
+    # --------------------------------------------------------------------------
+    # Header
+    # --------------------------------------------------------------------------
+    header = []
+    header.append([lvl_lbl,"","","","","","","User"])
+    header.append([])
+    header.append(['Index','Chapter Idx','Page','Title','Paragraph Idx' ,'Num Sentences',"x"])
+
+    # --------------------------------------------------------------------------
+    # Body
+    # --------------------------------------------------------------------------
+    body = []
+    for i, idx in enumerate(txt_lev):
+        # ----------------------------------------------------------------------
+        # Get the lex data
+        # ----------------------------------------------------------------------
+        lexicon = lex_lev[idx]
+        txt     = txt_lev[idx]
+        data    = dat_lev[idx]
+
+        # ----------------------------------------------------------------------
+        # Tear apart the index
+        # ----------------------------------------------------------------------
+        cidx  = idx[0][0]
+        page  = idx[0][1]
+        title = idx[0][2]
+        pidx  = idx[1]
+
+        # ----------------------------------------------------------------------
+        # Number of sentences for this paragraph
+        # ----------------------------------------------------------------------
+        snum = data['num_sentences_clean'] 
+
+        # ----------------------------------------------------------------------
+        # Make the record and add it
+        # ----------------------------------------------------------------------
+        rec = []
+        rec.append(i+1)
+        rec.append(cidx)
+        rec.append(page)
+        rec.append(title)
+        rec.append(pidx)
+        rec.append(snum)
+
+        body.append(rec)
+
+    # --------------------------------------------------------------------------
+    # Consolidate header and body
+    # --------------------------------------------------------------------------
+    data = matrixify([header,body])
+
+    # --------------------------------------------------------------------------
+    # Formatting
+    # --------------------------------------------------------------------------
+    fmt = {}
+    fmt['column_widths']  = [12, 12, 12, 80, 12, 12, 5]
+    fmt['reverse_rows']   = [1,2,3]
+    fmt['short_rows']     = [2]
+    fmt['wrap_rows']      = [3]
+    fmt['fix_rows_after'] = 3
+    fmt['freeze_panes']   = "A4"
+    fmt['gutter_cols']    = ["G"]
+    fmt['zoom']           = 80
+
+    # --------------------------------------------------------------------------
+    # Write the sheet in the file
+    # --------------------------------------------------------------------------
+    wb = xl.load_workbook(ifile)
+    o = write_excel_sheet(wb, lvl_lbl, data, fmt)
+    wb.save(ifile)
+    wb.close()
+
+    # --------------------------------------------------------------------------
+    # Finish
+    # --------------------------------------------------------------------------
+    return True
+
+# ------------------------------------------------------------------------------
+# Write out one page to the spreadsheet for a particular 'level' of text
+# ------------------------------------------------------------------------------
+def write_output_page_sentence(lex_data, ifile, corpus):
+    # --------------------------------------------------------------------------
+    # Start
+    # --------------------------------------------------------------------------
+    print("...writing sentence data to spreadsheet...")
+
+    # --------------------------------------------------------------------------
+    # Get the lexicon data for this particular level
+    # --------------------------------------------------------------------------
+    lex_lev = lex_data['sentence']
+    txt_lev = corpus['text_lvl']['sentence']
+
+    # --------------------------------------------------------------------------
+    # Make the level label out of the simple name
+    # --------------------------------------------------------------------------
+    lvl_lbl = "sentences"
+    lvl_lbl = lvl_lbl[:1].upper() + lvl_lbl[1:]
+
+
+    # --------------------------------------------------------------------------
+    # Header
+    # --------------------------------------------------------------------------
+    header = []
+    header.append([lvl_lbl,"","","","","","","","","","User"])
+    header.append([])
+    header.append(['Index','Chapter Idx','Page','Chapter Title','Paragraph Idx' ,'Sentence Idx','Clean Sent Idx','Text','Cleaning Instruction','x'])
+    
+    # --------------------------------------------------------------------------
+    # Body
+    # --------------------------------------------------------------------------
+    body = []
+    for i, idx in enumerate(txt_lev):
+        # ----------------------------------------------------------------------
+        # Get the lex and txt data
+        # ----------------------------------------------------------------------
+        lexicon = lex_lev[idx]
+        txt     = txt_lev[idx]
+
+        # ----------------------------------------------------------------------
+        # Tear apart the index
+        # ----------------------------------------------------------------------
+        cidx  = idx[0][0][0]
+        page  = idx[0][0][1]
+        title = idx[0][0][2]
+        pidx  = idx[0][1]
+        sidx  = idx[1]
+        sidx1 = idx[2]
+
+        # ----------------------------------------------------------------------
+        # Get the cleaning
+        # ----------------------------------------------------------------------
+        cln = ""
+        if cidx in corpus['cleaning']['text']:
+            if pidx in corpus['cleaning']['text'][cidx]:
+                if sidx in corpus['cleaning']['text'][cidx][pidx]:
+                    cln = ";".join(corpus['cleaning']['text'][cidx][pidx][sidx])
+
+        # ----------------------------------------------------------------------
+        # Make the record and add it
+        # ----------------------------------------------------------------------
+        rec = []
+        rec.append(i+1)
+        rec.append(cidx)
+        rec.append(page)
+        rec.append(title)
+        rec.append(pidx)
+        rec.append(sidx)
+        rec.append(sidx1)
+        rec.append(txt)
+        rec.append(cln)
+
+        body.append(rec)
+
+    # --------------------------------------------------------------------------
+    # Consolidate header and body
+    # --------------------------------------------------------------------------
+    data = matrixify([header,body])
+
+    # --------------------------------------------------------------------------
+    # Formatting
+    # --------------------------------------------------------------------------
+    fmt = {}
+    fmt['column_widths']        = [12, 12, 12, 40, 12, 12, 12, 130, 30, 5]
+    fmt['reverse_rows']         = [1,2,3]
+    fmt['short_rows']           = [2]
+    fmt['wrap_rows']            = [3]
+    fmt['wrap_cols']            = ["D","H"]
+    fmt['fix_row_height_after'] = 3
+    fmt['freeze_panes']         = "A4"
+    fmt['gutter_cols']          = ["J"]
+    fmt['zoom']                 = 80
 
     # --------------------------------------------------------------------------
     # Write the sheet in the file

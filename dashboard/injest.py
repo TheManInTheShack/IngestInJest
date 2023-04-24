@@ -25,6 +25,7 @@ from injest_init import init_dict
 pages = {}
 pages['splash']      = {'href':"/"           , 'name':"Home"          , 'func':layout_splash        }
 pages['lexicon']     = {'href':"/lexicon"    , 'name':"Lexicon"       , 'func':layout_lexicon       }
+pages['chapters']    = {'href':"/chapters"   , 'name':"Chapters"      , 'func':layout_chapters      }
 
 # ------------------------------------------------------------------------------
 # Store into the dict to be pushed into the layout

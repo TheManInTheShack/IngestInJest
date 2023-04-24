@@ -16,7 +16,7 @@ The books seem to focus on Saussure/Peirce, and then move chronologically throug
 
 ## Lacan
 
-## Derridas
+## Derrida
 
 ## Eco
 

@@ -8,7 +8,19 @@
         "type": "tabs",
         "children": [
           {
-            "id": "8276ad6ad680e47c",
+            "id": "56f2e066d164f3bb",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "_log/3-30-23.md",
+                "mode": "source",
+                "source": false
+              }
+            }
+          },
+          {
+            "id": "74c2d7b6936d3ed1",
             "type": "leaf",
             "state": {
               "type": "markdown",
@@ -19,7 +31,8 @@
               }
             }
           }
-        ]
+        ],
+        "currentTab": 1
       }
     ],
     "direction": "vertical"
@@ -176,39 +189,39 @@
       "juggl:Juggl global graph": false
     }
   },
-  "active": "8276ad6ad680e47c",
+  "active": "74c2d7b6936d3ed1",
   "lastOpenFiles": [
-    "academic/Semiotics.md",
-    "academic/People/Peirce.md",
-    "academic/People/Saussure.md",
-    "academic/People/Barthes.md",
-    "academic/People/Lacan.md",
-    "academic/People/Eco.md",
-    "academic/People/Derridas.md",
-    "academic/People/Propp.md",
-    "academic/People/Greimas.md",
-    "academic/People/St. Augustine.md",
-    "academic/People/Plato.md",
-    "academic/People",
-    "academic/Narrative.md",
-    "_log/3-20-23.md",
+    "analysis/Tools.md",
+    "analysis/POV.md",
+    "analysis/99 - Timeline.md",
+    "analysis/98 - Chronicle.md",
+    "analysis/97 - Calendar and Almanac.md",
+    "analysis/96 - Codex (Things).md",
+    "analysis/95 - Gazetteer (Places).md",
+    "analysis/94 - Roster (People).md",
+    "analysis/93 - Taxonomy.md",
+    "analysis/92 - Ontology.md",
+    "analysis/91 - Lexicon.md",
     "analysis/5 - Procedure - InJest.md",
+    "analysis/4 - Procedure - Ingest.md",
+    "analysis/3 - Methodology.md",
+    "analysis/2 - Work Overview.md",
+    "analysis/1 - Introduction.md",
+    "_log/4-16-23.md",
+    "_log/3-30-23.md",
     "_log/3-14-23.md",
+    "academic/People/Derrida.md",
+    "academic/People/Lacan.md",
+    "academic/Narrative.md",
+    "academic/Semiotics.md",
     "_log/3-11-23.md",
-    "Narrative",
     "chapters/CHAPTER 1.md",
+    "academic/People/Peirce.md",
+    "academic/People",
+    "Narrative",
     "academic",
     "Untitled.canvas",
     "Untitled Diagram.svg",
-    "analysis/9 - Lexicon.md",
-    "chapters/CHAPTER 5.md",
-    "chapters/CHAPTER 57.md",
-    "chapters/CHAPTER 54.md",
-    "chapters/CHAPTER 48.md",
-    "chapters/CHAPTER 45.md",
-    "chapters/CHAPTER 39.md",
-    "chapters/CHAPTER 30.md",
-    "chapters/CHAPTER 25.md",
     "_log",
     "analysis"
   ]

@@ -4,7 +4,7 @@
 import sys
 import os
 import json
-from lib import get_marked_data
+from injest_lib import get_marked_data
 
 # ==================================================================================================
 # Initialize
@@ -22,7 +22,7 @@ print("-"*80)
 title = "Ingest InJest: An approach to analysis of D.F.Wallace's 'Infinite Jest'"
 
 footnote = {}
-footnote['credits'] = "Application by Grant Dickerson, with Ava Barrett. Original elements copyright 2023."
+footnote['credits'] = "Application by Grant Dickerson, with Ava Barrett and Michael Carter. Original elements copyright 2023."
 footnote['revnum']  = "Rev.0"
 
 # ==================================================================================================
@@ -49,6 +49,7 @@ data = get_marked_data(data_fname)
 # ------------------------------------------------------------------------------
 # Get universal metrics
 # ------------------------------------------------------------------------------
+metrics = {}
 
 # ------------------------------------------------------------------------------
 # Hold the initialized data so we can pass it to the pages
@@ -58,7 +59,9 @@ init_dict['title']             = title
 init_dict['footnote']          = footnote
 init_dict['style_default']     = style_default
 init_dict['data']              = data
+init_dict['global_metrics']    = global_metrics
 
 # ------------------------------------------------------------------------------
 # User info
 # ------------------------------------------------------------------------------
+
