@@ -25,6 +25,18 @@
             "state": {
               "type": "markdown",
               "state": {
+                "file": "_log/4-16-23.md",
+                "mode": "source",
+                "source": false
+              }
+            }
+          },
+          {
+            "id": "565517a83e0009ab",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
                 "file": "chapters/CHAPTER 1.md",
                 "mode": "source",
                 "source": false
@@ -32,7 +44,7 @@
             }
           }
         ],
-        "currentTab": 1
+        "currentTab": 2
       }
     ],
     "direction": "vertical"
@@ -189,7 +201,7 @@
       "juggl:Juggl global graph": false
     }
   },
-  "active": "74c2d7b6936d3ed1",
+  "active": "565517a83e0009ab",
   "lastOpenFiles": [
     "analysis/Tools.md",
     "analysis/POV.md",
@@ -199,15 +211,17 @@
     "analysis/96 - Codex (Things).md",
     "analysis/95 - Gazetteer (Places).md",
     "analysis/94 - Roster (People).md",
-    "analysis/93 - Taxonomy.md",
     "analysis/92 - Ontology.md",
+    "analysis/93 - Taxonomy.md",
     "analysis/91 - Lexicon.md",
     "analysis/5 - Procedure - InJest.md",
     "analysis/4 - Procedure - Ingest.md",
     "analysis/3 - Methodology.md",
     "analysis/2 - Work Overview.md",
     "analysis/1 - Introduction.md",
+    "_log/5-3-23.md",
     "_log/4-16-23.md",
+    "chapters/CHAPTER 1.md",
     "_log/3-30-23.md",
     "_log/3-14-23.md",
     "academic/People/Derrida.md",
@@ -215,8 +229,6 @@
     "academic/Narrative.md",
     "academic/Semiotics.md",
     "_log/3-11-23.md",
-    "chapters/CHAPTER 1.md",
-    "academic/People/Peirce.md",
     "academic/People",
     "Narrative",
     "academic",
